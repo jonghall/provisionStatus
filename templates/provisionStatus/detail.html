@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+
+{% load staticfiles %}
+
+{% block title %}VSI Detail{% endblock %}
+
+{% block body_block %}
+
+    <script type="text/javascript" charset="utf-8">
+    $(document).ready(function() {
+            $('#requests').DataTable();
+    } );
+
+    </script>
+
+    <div class="panel panel-primary">
+    <div class="panel-heading">
+        <h3 class="panel-title">Current Details about GuestId {{ data.guestId }} at {{ current }}</h3>
+    </div>
+    <div class="panel-body">
+        {% if user.is_authenticated %}
+            {% if data %}
+                  <table id="requests" class="table table-striped table-condensed table-responsive wrap" cellspacing="0" width="100%"">
+
+                    <tbody>
+                        <tr>
+                            <td style="text-align: left;">FullyQualifiedDomainName</td>
+                            <td style="text-align: left;">{{ data.fullyQualifiedDomainName }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Private VSI</td>
+                            <td style="text-align: left;">{{ data.dedicatedAccountHostOnlyFlag }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">OS</td>
+                            <td style="text-align: left;">{{ data.operatingSystem }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Image</td>
+                            <td style="text-align: left;">{{ data.blockDeviceTemplateGroup }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">CPUs</td>
+                            <td style="text-align: left;">{{ data.maxCpu }}</td>
+                        </tr>
+                        <tr>
+
+                            <td style="text-align: left;">Memory</td>
+                            <td style="text-align: left;">{{ data.maxMemory }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">LocalDisk</td>
+                            <td style="text-align: left;">{{ data.localDiskFlag }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Datacenter</td>
+                            <td style="text-align: left;">{{ data.datacenter}}</td>
+                        </tr>
+                         <tr>
+                            <td style="text-align: left;">Server Room</td>
+                            <td style="text-align: left;">{{ data.serverRoom }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">FCR</td>
+                            <td style="text-align: left;">{{ data.frontendRouter }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">BCR</td>
+                            <td style="text-align: left;">{{ data.backendRouter }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Private VLAN</td>
+                            <td style="text-align: left;">{{ data.vlan }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Private IP</td>
+                            <td style="text-align: left;">{{ data.primaryBackendIpAddress }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Provisioning Request Time</td>
+                            <td style="text-align: left;">{{ data.createDate }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">Delta</td>
+                            <td style="text-align: left;">{{ data.delta }}</td>
+                        </tr>
+
+                        <tr>
+                            <td style="text-align: left;">ActiveTransaction</td>
+                            <td style="text-align: left;">{{ data.transactionStatus }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">ActiveTransaction averageDuration</td>
+                            <td style="text-align: left;">{{ data.averageDuration }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">ActiveTransaction Eplased Time</td>
+                            <td style="text-align: left;">{{ data.statusDuration }}</td>
+                        </tr>
+                        <tr>
+                            <td style="text-align: left;">IMS Transaction Link</td>
+                            <td style="text-align: left;"><a href="https://internal.softlayer.com/HardwareTransaction/automatedManagement/cloudlayer/{{ data.guestId }}">Link</a></td>
+                        </tr>
+                        <tr>
+                        <td style="text-align: left;">IMS Ticket</td>
+                            <td style="text-align: left;"><a href="https://internal.softlayer.com/Ticket/ticketPreview/{{ data.ticketId }}">{{ data.ticketId }}</a></td>
+
+                        </tr>
+
+                  </tbody>
+                  </table>
+            {% else %}
+                <strong><br /><center>There are no provisioning requests in progress to display.</center></br></strong>
+            {% endif %}
+        {% else %}
+            <strong><br /><center>You must first register and log in.</center></br></strong>
+        {%  endif %}
+    </div>
+    </div>
+
+{% endblock %}
+

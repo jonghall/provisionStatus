@@ -1,0 +1,1 @@
+web: gunicorn provistionStatus.wsgi --workers 3

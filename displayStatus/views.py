@@ -1,0 +1,374 @@
+import SoftLayer, configparser,logging,pytz
+from django.shortcuts import render
+from displayStatus.forms import UserForm, UserProfileForm
+from django.contrib.auth import authenticate, login
+from django.http import HttpResponseRedirect, HttpResponse
+from django.contrib.auth.decorators import login_required
+from datetime import datetime, timedelta
+
+def convert_timedelta(duration):
+    days, seconds = duration.days, duration.seconds
+    hours = days * 24 + seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    totalminutes = round((days * 1440) + (hours * 60) + minutes + (seconds / 60), 1)
+    return totalminutes
+
+def convert_timestamp(sldate):
+    central = pytz.timezone("US/Central")
+    formatedDate = sldate
+    formatedDate = formatedDate[0:22]+formatedDate[23:26]
+    formatedDate = datetime.strptime(formatedDate, "%Y-%m-%dT%H:%M:%S%z")
+    return formatedDate.astimezone(central)
+
+def getDescription(categoryCode, detail):
+    for item in detail:
+        if item['categoryCode'] == categoryCode:
+            return item['description']
+    return "Not Found"
+
+def initializeSoftLayerAPI():
+    filename = "config.ini"
+    config = configparser.ConfigParser()
+    config.read(filename)
+    client = SoftLayer.Client(username=config['api']['username'], api_key=config['api']['apikey'])
+    return client
+
+def getVirtualGuestsBeingProvisioned():
+    client = initializeSoftLayerAPI()
+    virtualGuests = client['Account'].getHourlyVirtualGuests(
+        mask='id, provisionDate, hostname, activeTicketCount, activeTickets, lastTransaction, activeTransaction, activeTransactions,datacenter, datacenter.name,serverRoom, primaryBackendIpAddress, networkVlans, backendRouters,blockDeviceTemplateGroup',
+        filter={
+            'hourlyVirtualGuests': {
+                'provisionDate': {'operation': 'is null'}
+            }
+    })
+    return virtualGuests
+
+def getDetail(guestId):
+    client = initializeSoftLayerAPI()
+    central = pytz.timezone("US/Central")
+    virtualGuest = client['Virtual_Guest'].getObject(id=guestId,
+        mask='activeTicketCount,activeTickets,activeTransaction, blockDeviceTemplateGroup, backendRouters,datacenter,frontendRouters,localDiskFlag,networkVlans,operatingSystem,powerState,primaryIpAddress,serverRoom')
+    data = {}
+    if 'activeTransaction' in virtualGuest:
+        createDate = virtualGuest['activeTransaction']['createDate']
+        data['guestId'] = virtualGuest['activeTransaction']['guestId']
+        data['transactionStatus']=virtualGuest['activeTransaction']['transactionStatus']['name']
+        data['statusDuration'] = round(virtualGuest['activeTransaction']['elapsedSeconds']/60,1)
+        if 'averageDuration' in virtualGuest['activeTransaction']['transactionStatus']:
+            data['averageDuration']=virtualGuest['activeTransaction']['transactionStatus']['averageDuration']
+        else:
+            data['averageDuration']=1
+    else:
+        createDate = virtualGuest['provisionDate']
+        data['guestId'] = virtualGuest['id']
+        data['transactionStatus'] = ""
+        data['statusDuration'] = 0
+        data['averageDuration'] = 1
+
+    activeTicketCount = virtualGuest['activeTicketCount']
+    activeTickets = virtualGuest['activeTickets']
+    if activeTicketCount > 0:
+        ticketId = activeTickets[0]['id']
+    else:
+        ticketId=""
+
+    createDateStamp = convert_timestamp(createDate)
+    currentDateStamp = central.localize(datetime.now())
+    data['delta'] = convert_timedelta(currentDateStamp - createDateStamp)
+    data['createDate'] = datetime.strftime(createDateStamp,"%Y-%m-%d %H:%M:%S")
+
+
+    if 'fullyQualifiedDomainName' in virtualGuest:
+        data['fullyQualifiedDomainName'] = virtualGuest['fullyQualifiedDomainName']
+
+    if 'blockDeviceTemplateGroup' in virtualGuest:
+        data['blockDeviceTemplateGroup']=virtualGuest['blockDeviceTemplateGroup']['name']
+
+    if "networkVlans" in virtualGuest:
+        data['vlan']=virtualGuest['networkVlans'][0]['vlanNumber']
+
+    if "frontendRouters" in virtualGuest:
+        data['frontendRouter']=virtualGuest['frontendRouters']['hostname']
+
+    if "backendRouters" in virtualGuest:
+        data['backendRouter']=virtualGuest['backendRouters'][0]['hostname']
+
+    if "datacenter" in virtualGuest:
+        data['datacenter']=virtualGuest['datacenter']['name']
+
+    if "serverRoom" in virtualGuest:
+        data['serverRoom']=virtualGuest['serverRoom']['longName']
+
+    if "primaryFrontEndIpAddress" in virtualGuest:
+        data['primaryFrontEndIpAddress']=virtualGuest['primaryFrontEndIpAddress']
+
+    if "primaryBackendIpAddress" in virtualGuest:
+        data['primaryBackendIpAddress']=virtualGuest['primaryBackendIpAddress']
+
+    if 'dedicatedAccountHostOnlyFlag' in virtualGuest:
+        data['dedicatedAccountHostOnlyFlag'] = virtualGuest['dedicatedAccountHostOnlyFlag']
+
+    if 'operatingSystem' in virtualGuest:
+        data['operatingSystem']=virtualGuest['operatingSystem']['softwareLicense']['softwareDescription']['name']
+
+    if 'maxMemory' in virtualGuest:
+        data['maxMemory'] = virtualGuest['maxMemory']
+
+    if 'maxCpu' in virtualGuest:
+        data['maxCpu'] = virtualGuest['maxCpu']
+
+    if 'powerState' in virtualGuest:
+        data['powerState'] = virtualGuest['powerState']['name']
+
+    if 'localDiskFlag' in virtualGuest:
+        data['localDiskFlag'] = virtualGuest['localDiskFlag']
+
+    return data
+
+def getStatus(virtualGuests):
+    central = pytz.timezone("US/Central")
+    rows=[]
+    for virtualGuest in virtualGuests:
+        if 'activeTransaction' in virtualGuest:
+            provisioned=False
+            guestId = virtualGuest['activeTransaction']['guestId']
+            createDate = virtualGuest['activeTransaction']['createDate']
+            transactionStatus = virtualGuest['activeTransaction']['transactionStatus']['name']
+            statusDuration = round(virtualGuest['activeTransaction']['elapsedSeconds']/60,1)
+            if 'averageDuration' in virtualGuest['activeTransaction']['transactionStatus']:
+                averageDuration=virtualGuest['activeTransaction']['transactionStatus']['averageDuration']
+            else:
+                averageDuration=1
+        else:
+            provisioned=True
+            guestId = virtualGuest['id']
+            createDate = virtualGuest['provisionDate']
+            transactionStatus = ""
+            statusDuration = 0
+            averageDuration = 1
+
+        createDateStamp = convert_timestamp(createDate)
+        currentDateStamp = central.localize(datetime.now())
+        delta = convert_timedelta(currentDateStamp - createDateStamp)
+
+        activeTicketCount = virtualGuest['activeTicketCount']
+        activeTickets = virtualGuest['activeTickets']
+
+        if activeTicketCount > 0:
+            ticketId = activeTickets[0]['id']
+        else:
+            ticketId = ""
+
+        if 'hostname' in virtualGuest:
+            hostName = virtualGuest['hostname']
+        else:
+            hostName = "unknown"
+
+        if 'blockDeviceTemplateGroup' in virtualGuest:
+            blockDeviceTemplateGroup=virtualGuest['blockDeviceTemplateGroup']['name']
+        else:
+            blockDeviceTemplateGroup="no"
+
+        if "networkVlans" in virtualGuest:
+            vlan=virtualGuest['networkVlans'][0]['vlanNumber']
+        else:
+            vlan=""
+
+        if "backendRouters" in virtualGuest:
+            backendRouter=virtualGuest['backendRouters'][0]['hostname']
+        else:
+            backendRouter=""
+
+        if "datacenter" in virtualGuest:
+            datacenter=virtualGuest['datacenter']['name']
+        else:
+            datacenter=""
+
+        if "serverRoom" in virtualGuest:
+            serverRoom=virtualGuest['serverRoom']['longName']
+        else:
+            serverRoom=""
+
+        if "primaryBackendIpAddress" in virtualGuest:
+            primaryBackendIpAddress=virtualGuest['primaryBackendIpAddress']
+        else:
+            primaryBackendIpAddress=""
+
+        createDate=datetime.strftime(createDateStamp,"%Y-%m-%d")
+        createTime=datetime.strftime(createDateStamp,"%H:%M:%S")
+
+        status = "unknown"
+
+        logging.info('%s using %s image behind %s on vlan %s is %s. (delta=%s, average=%s, duration=%s, request=%s).' % (guestId,blockDeviceTemplateGroup,backendRouter, vlan, status,delta,averageDuration,statusDuration,datetime.strftime(createDateStamp, "%H:%M:%S%z")))
+
+        if provisioned:
+            status="COMPLETE"
+        else:
+            # IF DURATION PROGRESSING < 45 THEN ON TRACK
+            if (delta) < 45:
+                status = "ONTRACK"
+            # IF DURATION BETWEEN 45 & 75 & PROGRESSING < 45 THEN ON AT RISK
+            if (delta >= 45) and (delta < 75):
+                status = "ATRISK"
+            # IF DURATION > 75 & PROGRESSING THEN ON TRACK MARK AS CRITICAL ONLY
+            if (delta) >= 75 and (statusDuration < 15):
+                status = "CRITICAL"
+            # IF DURATION > 75 & NOT PROGRESSING THEN MARK STALLED.
+            if (delta) >= 60 and (statusDuration >= 15):
+                status = "STALLED"
+
+        row = {'guestId': guestId,
+            'hostName': hostName,
+            'blockDeviceTemplateGroup': blockDeviceTemplateGroup,
+            'datacenter': datacenter,
+            'serverRoom': serverRoom,
+            'backendRouter': backendRouter,
+            'vlan': vlan,
+            'primaryBackendIpAddress': primaryBackendIpAddress,
+            'createDate': createDate,
+            'createTime': createTime,
+            'delta': delta,
+            'transactionStatus': transactionStatus,
+            'averageDuration': averageDuration,
+            'statusDuration': statusDuration,
+            'status': status,
+            'ticketId': ticketId
+            }
+        rows.append(row)
+    return rows
+
+def index(request):
+    logging.basicConfig(filename='events.log', format='%(asctime)s %(message)s', level=logging.WARNING)
+    virtualGuests = getVirtualGuestsBeingProvisioned()
+    status = getStatus(virtualGuests)
+    context_dict = {
+        'current': datetime.strftime(datetime.now(), "%B %d, %Y %H:%M %p"),
+        'count': len(status),
+        'status': status
+        }
+    response = render(request,'provisionStatus/index.html', context_dict)
+    return response
+
+def detail(request,guestId):
+    logging.basicConfig(filename='events.log', format='%(asctime)s %(message)s', level=logging.WARNING)
+    detail = getDetail(guestId)
+    context_dict = {
+        'current': datetime.strftime(datetime.now(), "%B %d, %Y %H:%M %p"),
+        'data': detail
+        }
+    response = render(request,'provisionStatus/detail.html', context_dict)
+    return response
+
+def register(request):
+
+    # A boolean value for telling the template whether the registration was successful.
+    # Set to False initially. Code changes value to True when registration succeeds.
+    registered = False
+
+    # If it's a HTTP POST, we're interested in processing form data.
+    if request.method == 'POST':
+        # Attempt to grab information from the raw form information.
+        # Note that we make use of both UserForm and UserProfileForm.
+        user_form = UserForm(data=request.POST)
+        profile_form = UserProfileForm(data=request.POST)
+
+        # If the two forms are valid...
+        if user_form.is_valid() and profile_form.is_valid():
+            # Save the user's form data to the database.
+            user = user_form.save()
+
+            # Now we hash the password with the set_password method.
+            # Once hashed, we can update the user object.
+            user.set_password(user.password)
+            user.save()
+
+            # Now sort out the UserProfile instance.
+            # Since we need to set the user attribute ourselves, we set commit=False.
+            # This delays saving the model until we're ready to avoid integrity problems.
+            profile = profile_form.save(commit=False)
+            profile.user = user
+
+            # Did the user provide a profile picture?
+            # If so, we need to get it from the input form and put it in the UserProfile model.
+            if 'picture' in request.FILES:
+                profile.picture = request.FILES['picture']
+
+            # Now we save the UserProfile model instance.
+            profile.save()
+
+            # Update our variable to tell the template registration was successful.
+            registered = True
+
+        # Invalid form or forms - mistakes or something else?
+        # Print problems to the terminal.
+        # They'll also be shown to the user.
+        else:
+            print (user_form.errors), profile_form.errors
+
+    # Not a HTTP POST, so we render our form using two ModelForm instances.
+    # These forms will be blank, ready for user input.
+    else:
+        user_form = UserForm()
+        profile_form = UserProfileForm()
+
+    # Render the template depending on the context.
+    return render(request,
+            'displayStatus/register.html',
+            {'user_form': user_form, 'profile_form': profile_form, 'registered': registered} )
+
+def user_login(request):
+
+    # If the request is a HTTP POST, try to pull out the relevant information.
+    if request.method == 'POST':
+        # Gather the username and password provided by the user.
+        # This information is obtained from the login form.
+                # We use request.POST.get('<variable>') as opposed to request.POST['<variable>'],
+                # because the request.POST.get('<variable>') returns None, if the value does not exist,
+                # while the request.POST['<variable>'] will raise key error exception
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+
+        # Use Django's machinery to attempt to see if the username/password
+        # combination is valid - a User object is returned if it is.
+        user = authenticate(username=username, password=password)
+
+        # If we have a User object, the details are correct.
+        # If None (Python's way of representing the absence of a value), no user
+        # with matching credentials was found.
+        if user:
+            # Is the account active? It could have been disabled.
+            if user.is_active:
+                # If the account is valid and active, we can log the user in.
+                # We'll send the user back to the homepage.
+                login(request, user)
+                return HttpResponseRedirect('/rango/')
+            else:
+                # An inactive account was used - no logging in!
+                return HttpResponse("Your Rango account is disabled.")
+        else:
+            # Bad login details were provided. So we can't log the user in.
+            print ("Invalid login details: {0}, {1}".format(username, password))
+            return HttpResponse("Invalid login details supplied.")
+
+    # The request is not a HTTP POST, so display the login form.
+    # This scenario would most likely be a HTTP GET.
+    else:
+        # No context variables to pass to the template system, hence the
+        # blank dictionary object...
+        return render(request, 'accounts/login.html', {})
+
+
+@login_required
+def restricted(request):
+    return HttpResponse("Since you're logged in, you can see this text!")
+
+# Use the login_required() decorator to ensure only those logged in can access the view.
+@login_required
+def user_logout(request):
+    # Since we know the user is logged in, we can now just log them out.
+    logout(request)
+
+    # Take the user back to the homepage.
+    return HttpResponseRedirect('/displayStatus/')

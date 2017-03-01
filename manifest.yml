@@ -1,0 +1,7 @@
+---
+applications:
+- name: provisionStatus
+  instances: 1
+  memory: 256M
+  command: null
+  buildpack: https://github.com/cloudfoundry/buildpack-python.git
