@@ -1,1 +1,6 @@
 # Created by .ignore support plugin (hsz.mobi)
+.idea/
+config.ini
+db.sqlite3
+events.log
+
