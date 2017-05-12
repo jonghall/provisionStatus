@@ -10,7 +10,7 @@ echo "------ Create database tables ------"
 python manage.py migrate --noinput
 
 echo "------ create default admin user ------"
-echo "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'jonhall@us.ibm.com', 'beacon1026')" | python manage.py shell
+echo "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'user@gmail.com', 'password')" | python manage.py shell
 
 echo "------ starting gunicorn &nbsp;------"
 gunicorn provisionStatus.wsgi --workers 3 --timeout 120
